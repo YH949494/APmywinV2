@@ -1,20 +1,15 @@
-# fly.toml - Fly.io configuration for a Python Telegram bot worker
+# fly.toml - Fly.io configuration for your Telegram bot
 
-app = "apmywinv2-bot"  # Replace with your unique app name
+app = "apmywinv2"  # your app name, lowercase letters and dashes only
 
-# Environment variables (your bot token will be stored as a secret)
-[env]
-# BOT_TOKEN should be set via Fly secrets, not hardcoded
-# Example: fly secrets set BOT_TOKEN="your-telegram-bot-token"
+# Optional: specify Python version for Fly.io build
+[build]
+image = "python:3.10-slim"
 
-# Background worker process
+# Environment variables can be set via Fly secrets, not here
+# [env]
+# BOT_TOKEN should be set with: fly secrets set BOT_TOKEN="your-telegram-bot-token"
+
+# Define worker process
 [processes]
 worker = "python main.py"
-
-# Optional: Remove the [services] section because we don't need HTTP
-# Uncomment below only if you want to expose a port for some reason
-# [[services]]
-#   internal_port = 8080
-#   protocol = "tcp"
-#   [[services.ports]]
-#     port = 8080
