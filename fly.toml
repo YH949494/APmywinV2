@@ -1,6 +1,6 @@
 # fly.toml - Fly.io configuration for a Python Telegram bot worker
 
-app = "your-bot-app-name"  # Replace with your unique app name
+app = "APmywinV2_bot"  # Replace with your unique app name
 
 # Environment variables (your bot token will be stored as a secret)
 [env]
