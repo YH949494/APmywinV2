@@ -15,17 +15,9 @@ jobs:
 
       - name: Set up Fly.io CLI
         uses: superfly/flyctl-actions/setup-flyctl@v1
-        # Remove 'with: version' to use the latest stable flyctl
-        # with:
-        #   version: 1.3.0
 
       - name: Authenticate Fly.io
-        env:
-          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
-        run: flyctl auth token
+        run: flyctl auth token ${{ secrets.FLY_API_TOKEN }}
 
       - name: Deploy Worker
-        env:
-          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
         run: flyctl deploy --remote-only
-
