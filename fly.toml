@@ -1,4 +1,4 @@
 app = "apmywinv2"
 
 [processes]
-worker = "python main.py"
+worker = "python main.py" 
