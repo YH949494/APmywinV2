@@ -1,0 +1,20 @@
+# fly.toml - Fly.io configuration for a Python Telegram bot worker
+
+app = "your-bot-app-name"  # Replace with your unique app name
+
+# Environment variables (your bot token will be stored as a secret)
+[env]
+# BOT_TOKEN should be set via Fly secrets, not hardcoded
+# Example: fly secrets set BOT_TOKEN="your-telegram-bot-token"
+
+# Background worker process
+[processes]
+worker = "python main.py"
+
+# Optional: Remove the [services] section because we don't need HTTP
+# Uncomment below only if you want to expose a port for some reason
+# [[services]]
+#   internal_port = 8080
+#   protocol = "tcp"
+#   [[services.ports]]
+#     port = 8080
