@@ -3,7 +3,7 @@ name: Deploy to Fly.io
 on:
   push:
     branches:
-      - main  # Change if you use a different branch
+      - main
 
 jobs:
   deploy:
@@ -16,7 +16,7 @@ jobs:
       - name: Set up Fly.io CLI
         uses: superfly/flyctl-actions/setup-flyctl@v1
         with:
-          version: '1.3.0'  # Latest stable version
+          version: 1.3.0
 
       - name: Authenticate Fly.io
         env:
