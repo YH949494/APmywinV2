@@ -4,7 +4,7 @@ from telegram.ext import Updater, MessageHandler, Filters, CallbackContext
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 
-# In-memory leaderboard (replace with DB in production)
+# In-memory leaderboard (replace with DB in production) 
 leaderboard = {}
 
 def handle_message(update: Update, context: CallbackContext):
