@@ -27,4 +27,5 @@ jobs:
       - name: Deploy Worker
         env:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
-        run: flyctl deploy --process worker --remote-only
+        run: flyctl deploy --remote-only
+
