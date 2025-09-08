@@ -3,6 +3,8 @@ from telegram import Update
 from telegram.ext import Updater, MessageHandler, CallbackContext, filters
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
+if not BOT_TOKEN:
+    raise ValueError("BOT_TOKEN is not set. Use fly secrets set BOT_TOKEN=...")
 
 leaderboard = {}
 
@@ -34,5 +36,6 @@ updater.dispatcher.add_handler(
     MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message)
 )
 
-updater.start_polling()
+# Poll every 5 seconds
+updater.start_polling(poll_interval=5)
 updater.idle()
