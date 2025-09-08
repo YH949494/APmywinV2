@@ -1,11 +1,4 @@
-# fly.toml - Fly.io configuration for your Telegram bot
+app = "apmywinv2"
 
-app = "apmywinv2"  # must be lowercase letters and dashes only
-
-# Optional: force Python version (Fly.io build)
-[build]
-image = "python:3.10-slim"
-
-# Define worker process
 [processes]
 worker = "python main.py"
