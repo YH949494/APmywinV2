@@ -30,24 +30,21 @@ def add_xp(user_id: int, xp: int, game_name: str | None = None):
         update["$inc"][f"games.{game_name}"] = xp
     users_collection.update_one({"_id": user_id}, update, upsert=True)
 
-# --- #mywin handler ---
-async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def filter_mywin_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
     message = update.message
     if not message:
         return
 
-    caption = message.caption or ""
+    # Only allow photo or video
+    if message.photo or message.video:
+        caption = message.caption or ""
+        if caption.lower().startswith("#mywin"):
+            parts = caption.split("#mywin", 1)
+            game_name = parts[1].strip() if len(parts) > 1 else ""
+            if game_name:  # Only allow if game name exists
+                return  # Valid message
 
-    # Check: must have photo AND valid #mywin caption
-    if message.photo and caption.startswith("#mywin"):
-        parts = caption.split("#mywin", 1)
-        game_name = parts[1].strip() if len(parts) > 1 else ""
-        if game_name:  # valid #mywin <game>
-            add_xp(message.from_user.id, 20, game_name)
-            await message.reply_text(f"✅ +20 XP for {game_name}!")
-            return
-
-    # Delete any message that does not match the rules
+    # Delete anything else
     await message.delete()
 
 # --- Reaction handler (works without importing ReactionUpdated) ---
