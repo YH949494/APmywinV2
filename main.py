@@ -34,9 +34,6 @@ async def filter_mywin_media(update: Update, context: ContextTypes.DEFAULT_TYPE)
     if not message:
         return
 
-    if message.chat_id != MYWIN_GROUP_ID:
-        return  # ignore other groups
-
     caption = (message.caption or "").strip().lower()
 
     has_image = (
@@ -70,7 +67,7 @@ async def handle_reaction(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     msg = reaction.message
-    if not msg or msg.chat_id != MYWIN_GROUP_ID:
+    if not msg:
         return
 
     user_id = reaction.user.id
