@@ -1,15 +1,24 @@
-# Use Python 3.10 slim image
+# Use slim python base
 FROM python:3.10-slim
 
 # Set working directory
 WORKDIR /app
 
-# Copy requirements and install dependencies
+# Avoid Python writing pyc files, force stdout flush
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+
+# Upgrade pip first
+RUN pip install --upgrade pip
+
+# Copy requirements first (to leverage caching if only code changes)
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy bot code
-COPY main.py .
+# Always force reinstall to avoid old cache
+RUN pip install --no-cache-dir --force-reinstall -r requirements.txt
 
-# Run the bot
+# Copy the rest of the bot
+COPY . .
+
+# Run your bot
 CMD ["python", "main.py"]
