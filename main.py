@@ -1,6 +1,6 @@
 import os
 from telegram import Update
-from telegram.ext import Updater, MessageHandler, CallbackContext, filters
+from telegram.ext import ApplicationBuilder, MessageHandler, ContextTypes, filters
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 if not BOT_TOKEN:
@@ -8,8 +8,11 @@ if not BOT_TOKEN:
 
 leaderboard = {}
 
-def handle_message(update: Update, context: CallbackContext):
+async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     message = update.message
+    if not message:
+        return
+
     text = message.text or ""
     has_photo = bool(message.photo)
 
@@ -19,23 +22,18 @@ def handle_message(update: Update, context: CallbackContext):
         if game_name:
             add_to_leaderboard(message.from_user.id, game_name, 20)
         else:
-            message.delete()
+            await message.delete()
     else:
-        message.delete()
+        await message.delete()
 
 def add_to_leaderboard(user_id, game_name, xp):
     if user_id not in leaderboard:
         leaderboard[user_id] = {"xp": 0, "games": {}}
     leaderboard[user_id]["xp"] += xp
-    if game_name not in leaderboard[user_id]["games"]:
-        leaderboard[user_id]["games"][game_name] = 0
+    leaderboard[user_id]["games"].setdefault(game_name, 0)
     leaderboard[user_id]["games"][game_name] += xp
 
-updater = Updater(BOT_TOKEN)
-updater.dispatcher.add_handler(
-    MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message)
-)
+app = ApplicationBuilder().token(BOT_TOKEN).build()
+app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
-# Poll every 5 seconds
-updater.start_polling(poll_interval=5)
-updater.idle()
+app.run_polling(poll_interval=5)
