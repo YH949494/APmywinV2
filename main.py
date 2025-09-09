@@ -1,6 +1,5 @@
 import os
-from telegram import Update, Message
-from telegram._reactionupdated import ReactionUpdated
+from telegram import Update, Message, ReactionUpdated
 from telegram.ext import (
     ApplicationBuilder,
     MessageHandler,
