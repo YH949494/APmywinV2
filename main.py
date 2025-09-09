@@ -32,30 +32,20 @@ def add_xp(user_id: int, xp: int, game_name: str | None = None):
 
 # --- #mywin handler ---
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    msg = update.message
-    if not msg:
-        return
+    message = update.message
+    if not message or not message.photo:
+        return  # only process photo messages
 
-    text = msg.text or ""
-    has_photo = bool(msg.photo)
-
-    if "#mywin" in text and has_photo:
-        parts = text.split("#mywin", 1)
+    caption = message.caption or ""
+    if "#mywin" in caption:
+        parts = caption.split("#mywin", 1)
         game_name = parts[1].strip() if len(parts) > 1 else ""
         if game_name:
-            add_xp(msg.from_user.id, 20, game_name)
-            # store this message id so reactions can be validated later
-            mywin_posts.update_one(
-                {"_id": msg.message_id},
-                {"$set": {"chat_id": msg.chat_id, "user_id": msg.from_user.id, "game": game_name}},
-                upsert=True,
-            )
-            # optional: silent; no reply if you don't want messages
-            # await msg.reply_text(f"✅ +20 XP for {game_name}!")
-        else:
-            await msg.delete()
-    else:
-        await msg.delete()
+            add_xp(message.from_user.id, 20, game_name)
+            await message.reply_text(f"✅ +20 XP for {game_name}!")
+            return
+    # If it reaches here, caption is invalid → delete message
+    await message.delete()
 
 # --- Reaction handler (works without importing ReactionUpdated) ---
 async def handle_any_update(update: Update, context: ContextTypes.DEFAULT_TYPE):
