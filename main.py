@@ -18,7 +18,7 @@ async def filter_mywin_media(update: Update, context: ContextTypes.DEFAULT_TYPE)
     caption = (message.caption or "").strip()
     has_image = (
         message.photo
-        or (message.document and message.document.mime_type.startswith("image"))
+        or (message.document and getattr(message.document, "mime_type", "").startswith("image"))
     )
 
     # Only allow image + proper caption
@@ -27,17 +27,28 @@ async def filter_mywin_media(update: Update, context: ContextTypes.DEFAULT_TYPE)
         game_name = parts[1].strip() if len(parts) > 1 else ""
 
         if game_name:
-            # ✅ Directly update XP in your existing MongoDB users collection
+            # ✅ Make sure the user exists first
+            user_doc = users_collection.find_one({"user_id": message.from_user.id})
+            if not user_doc:
+                # Create user if missing
+                users_collection.insert_one({
+                    "user_id": message.from_user.id,
+                    "username": message.from_user.username,
+                    "xp": 0,
+                    "weekly_xp": 0,
+                    "monthly_xp": 0
+                })
+
+            # ✅ Update XP
             users_collection.update_one(
                 {"user_id": message.from_user.id},
-                {"$inc": {"xp": 20, "weekly_xp": 20, "monthly_xp": 20}},
-                upsert=True,
+                {"$inc": {"xp": 20, "weekly_xp": 20, "monthly_xp": 20}}
             )
 
             await message.reply_text(f"✅ +20 XP for {game_name}!")
             return
 
-    # Delete all invalid submissions
+    # Delete invalid messages
     await message.delete()
 
 # --- Run bot ---
