@@ -33,18 +33,21 @@ def add_xp(user_id: int, xp: int, game_name: str | None = None):
 # --- #mywin handler ---
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     message = update.message
-    if not message or not message.photo:
-        return  # only process photo messages
+    if not message:
+        return
 
     caption = message.caption or ""
-    if "#mywin" in caption:
+
+    # Check if message has photo and proper #mywin caption
+    if message.photo and caption.startswith("#mywin"):
         parts = caption.split("#mywin", 1)
         game_name = parts[1].strip() if len(parts) > 1 else ""
-        if game_name:
+        if game_name:  # valid #mywin <game>
             add_xp(message.from_user.id, 20, game_name)
             await message.reply_text(f"✅ +20 XP for {game_name}!")
             return
-    # If it reaches here, caption is invalid → delete message
+
+    # Delete any message not matching the rules
     await message.delete()
 
 # --- Reaction handler (works without importing ReactionUpdated) ---
