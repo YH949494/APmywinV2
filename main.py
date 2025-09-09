@@ -38,7 +38,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     caption = message.caption or ""
 
-    # Check if message has photo and proper #mywin caption
+    # Check: must have photo AND valid #mywin caption
     if message.photo and caption.startswith("#mywin"):
         parts = caption.split("#mywin", 1)
         game_name = parts[1].strip() if len(parts) > 1 else ""
@@ -47,7 +47,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await message.reply_text(f"✅ +20 XP for {game_name}!")
             return
 
-    # Delete any message not matching the rules
+    # Delete any message that does not match the rules
     await message.delete()
 
 # --- Reaction handler (works without importing ReactionUpdated) ---
