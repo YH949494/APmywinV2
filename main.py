@@ -35,24 +35,26 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not message:
         return
 
-    # Only allow photos or videos
-    if not (message.photo or message.video):
+    caption = (message.caption or "").strip().lower()
+
+    # Only allow photo, video, or image document
+    has_media = message.photo or message.video or (message.document and message.document.mime_type.startswith("image"))
+    if not has_media:
         await message.delete()
         return
 
-    caption = (message.caption or "").strip()
-
-    # Check for proper #mywin caption
-    if caption.lower().startswith("#mywin"):
+    # Must start with #mywin and have a game name
+    if caption.startswith("#mywin"):
         parts = caption.split("#mywin", 1)
         game_name = parts[1].strip() if len(parts) > 1 else ""
-        if game_name:  # Valid #mywin + game
+        if game_name:
             add_xp(message.from_user.id, 20, game_name)
             await message.reply_text(f"✅ +20 XP for {game_name}!")
             return
 
-    # Delete any message not matching rules
+    # Delete anything else
     await message.delete()
+
 
 # --- Reaction handler (works without importing ReactionUpdated) ---
 async def handle_any_update(update: Update, context: ContextTypes.DEFAULT_TYPE):
