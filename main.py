@@ -41,7 +41,6 @@ async def filter_mywin_media(update: Update, context: ContextTypes.DEFAULT_TYPE)
                 {"$inc": {"xp": 20, "weekly_xp": 20, "monthly_xp": 20}},
                 upsert=True
             )
-            await message.reply_text(f"✅ +20 XP for {game_name}!")
             return
 
     # Delete everything else
