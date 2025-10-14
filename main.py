@@ -18,6 +18,8 @@ db = client["referral_bot"]
 users_collection = db["users"]
 mywin_posts = db["mywin_posts"]  # track valid mywin posts
 
+TAG_PATTERN = re.compile(r'^\s*#(?P<tag>mywin|comebackisreal)\s+(?P<game>.+)$', re.IGNORECASE)
+
 # ----------------------------
 # MyWin Media Handler
 # ----------------------------
@@ -42,9 +44,10 @@ async def filter_mywin_media(update: Update, context: ContextTypes.DEFAULT_TYPE)
         file_id = message.document.file_unique_id
 
     # only allow posts with image + proper caption
-    if has_image and caption.startswith("#mywin") and file_id:
-        parts = caption.split("#mywin", 1)
-        game_name = parts[1].strip() if len(parts) > 1 else ""
+    m = TAG_PATTERN.match(caption_raw)
+    if has_image and file_id and m:
+        tag = m.group("tag").lower()         # "mywin" or "comebackisreal"
+        game_name = m.group("game").strip()  # preserve user’s casing
 
         if game_name:
             # check duplicate by file_id
