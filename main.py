@@ -10,7 +10,7 @@ from telegram.ext import ApplicationBuilder, MessageHandler, ContextTypes, filte
 # ----------------------------
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 MONGO_URL = os.environ.get("MONGO_URL")
-
+ 
 # ----------------------------
 # MongoDB Setup
 # ----------------------------
