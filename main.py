@@ -1,7 +1,8 @@
 import os
 import re
-from datetime import datetime
-from pymongo import MongoClient
+from datetime import datetime, timezone
+from pymongo import MongoClient, ASCENDING
+from pymongo.errors import DuplicateKeyError
 from telegram import Update
 from telegram.ext import ApplicationBuilder, MessageHandler, ContextTypes, filters
 
@@ -16,11 +17,18 @@ MONGO_URL = os.environ.get("MONGO_URL")
 # ----------------------------
 client = MongoClient(MONGO_URL)
 db = client["referral_bot"]
-users_collection = db["users"]
 mywin_posts = db["mywin_posts"]  # track valid mywin/comeback posts
+xp_events = db["xp_events"]
 
 # Accept either hashtag (case-insensitive), require at least one space + game name
 TAG_PATTERN = re.compile(r'^\s*#(?P<tag>mywin|comebackisreal)\s+(?P<game>.+)$', re.IGNORECASE)
+
+def ensure_indexes():
+    xp_events.create_index(
+        [("user_id", ASCENDING), ("unique_key", ASCENDING)],
+        unique=True,
+        name="uq_xp_user_unique_key",
+    )
 
 # ----------------------------
 # MyWin / ComebackIsReal Media Handler
@@ -58,20 +66,33 @@ async def filter_mywin_media(update: Update, context: ContextTypes.DEFAULT_TYPE)
                 return
 
             # insert record
+            now = datetime.now(timezone.utc)         
             mywin_posts.insert_one({
                 "file_id": file_id,
                 "user_id": message.from_user.id,
                 "tag": tag,
                 "game_name": game_name,
-                "ts": datetime.utcnow(),
+                "ts": now,
             })
 
-            # increment XP (first time only)
-            users_collection.update_one(
-                {"user_id": message.from_user.id},
-                {"$inc": {"xp": 20, "weekly_xp": 20, "monthly_xp": 20}},
-                upsert=True
-            )
+            reason = "mywin_submission" if tag == "mywin" else "comeback_submission"
+            xp_event = {
+                "user_id": message.from_user.id,
+                "xp": 20,
+                "reason": reason,
+                "unique_key": f"mywin:{file_id}",
+                "ts": now,
+                "created_at": now,
+                "meta": {
+                    "file_id": file_id,
+                    "tag": tag,
+                    "game_name": game_name,
+                },
+            }
+            try:
+                xp_events.insert_one(xp_event)
+            except DuplicateKeyError:
+                pass
             return
 
     # delete anything else
@@ -81,6 +102,7 @@ async def filter_mywin_media(update: Update, context: ContextTypes.DEFAULT_TYPE)
 # Run Bot
 # ----------------------------
 def main():
+    ensure_indexes() 
     app_bot = ApplicationBuilder().token(BOT_TOKEN).build()
     # (Optional but recommended) only process photos or image documents to reduce noise:
     img_filter = (filters.PHOTO | filters.Document.IMAGE)
