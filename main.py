@@ -1,3 +1,4 @@
+import logging
 import os
 import re
 from datetime import datetime, timezone
@@ -6,6 +7,7 @@ from pymongo.errors import DuplicateKeyError
 from telegram import Update
 from telegram.ext import ApplicationBuilder, MessageHandler, ContextTypes, filters
 
+from backfill_mywin import backfill_mywin_to_xp_events
 # ----------------------------
 # Config
 # ----------------------------
@@ -19,6 +21,7 @@ client = MongoClient(MONGO_URL)
 db = client["referral_bot"]
 mywin_posts = db["mywin_posts"]  # track valid mywin/comeback posts
 xp_events = db["xp_events"]
+admin_cache = db["admin_cache"]
 
 # Accept either hashtag (case-insensitive), require at least one space + game name
 TAG_PATTERN = re.compile(r'^\s*#(?P<tag>mywin|comebackisreal)\s+(?P<game>.+)$', re.IGNORECASE)
@@ -32,6 +35,74 @@ def ensure_indexes():
         )
     except DuplicateKeyError:
         pass
+
+
+def _parse_bool(value: str) -> bool:
+    return (value or "").lower() in {"1", "true", "yes", "on"}
+
+
+def _run_settle_jobs():
+    for name in (
+        "settle_pending_referrals_with_cache_clear",
+        "settle_referral_snapshots_with_cache_clear",
+        "settle_xp_snapshots_with_cache_clear",
+    ):
+        func = globals().get(name)
+        if callable(func):
+            func()
+
+
+def run_mywin_backfill_if_enabled():
+    if os.getenv("RUNNER_MODE") != "worker":
+        return
+    if os.getenv("RUN_MYWIN_BACKFILL") != "1":
+        return
+
+    if admin_cache.find_one({"_id": "mywin_backfill_done", "done": True}):
+        logging.info("[MYWIN_BACKFILL] skipped (already marked done)")
+        return
+
+    dry_run = _parse_bool(os.getenv("MYWIN_BACKFILL_DRY_RUN", "0"))
+    xp_per_post = int(os.getenv("MYWIN_XP_PER_POST", "20"))
+    batch_limit = int(os.getenv("MYWIN_BACKFILL_BATCH", "1000"))
+
+    logging.info(
+        "[MYWIN_BACKFILL] start dry_run=%s xp_per_post=%s batch_limit=%s",
+        dry_run,
+        xp_per_post,
+        batch_limit,
+    )
+    try:
+        stats = backfill_mywin_to_xp_events(
+            db,
+            xp_per_post=xp_per_post,
+            batch_limit=batch_limit,
+            dry_run=dry_run,
+        )
+        _run_settle_jobs()
+        if not dry_run:
+            admin_cache.update_one(
+                {"_id": "mywin_backfill_done"},
+                {
+                    "$set": {
+                        "done": True,
+                        "ts": datetime.now(timezone.utc),
+                        "inserted": stats["inserted"],
+                        "dup": stats["dup"],
+                    }
+                },
+                upsert=True,
+            )
+        logging.info(
+            "[MYWIN_BACKFILL] done scanned=%s inserted=%s dup=%s skipped=%s errors=%s",
+            stats["scanned"],
+            stats["inserted"],
+            stats["dup"],
+            stats["skipped"],
+            stats["errors"],
+        )
+    except Exception as exc:
+        logging.exception("[MYWIN_BACKFILL] failed err=%s", exc)
 
 # ----------------------------
 # MyWin / ComebackIsReal Media Handler
@@ -105,7 +176,8 @@ async def filter_mywin_media(update: Update, context: ContextTypes.DEFAULT_TYPE)
 # Run Bot
 # ----------------------------
 def main():
-    ensure_indexes() 
+    ensure_indexes()
+    run_mywin_backfill_if_enabled()
     app_bot = ApplicationBuilder().token(BOT_TOKEN).build()
     # (Optional but recommended) only process photos or image documents to reduce noise:
     img_filter = (filters.PHOTO | filters.Document.IMAGE)
