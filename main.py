@@ -24,11 +24,14 @@ xp_events = db["xp_events"]
 TAG_PATTERN = re.compile(r'^\s*#(?P<tag>mywin|comebackisreal)\s+(?P<game>.+)$', re.IGNORECASE)
 
 def ensure_indexes():
-    xp_events.create_index(
-        [("user_id", ASCENDING), ("unique_key", ASCENDING)],
-        unique=True,
-        name="uq_xp_user_unique_key",
-    )
+    try:
+        xp_events.create_index(
+            [("user_id", ASCENDING), ("unique_key", ASCENDING)],
+            unique=True,
+            name="uq_xp_user_unique_key",
+        )
+    except DuplicateKeyError:
+        pass
 
 # ----------------------------
 # MyWin / ComebackIsReal Media Handler
