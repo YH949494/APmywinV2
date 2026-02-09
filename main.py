@@ -21,6 +21,8 @@ client = MongoClient(MONGO_URL)
 db = client["referral_bot"]
 mywin_posts = db["mywin_posts"]  # track valid mywin/comeback posts
 xp_events = db["xp_events"]
+events = db["events"]
+members = db["members"]
 admin_cache = db["admin_cache"]
 
 # Accept either hashtag (case-insensitive), require at least one space + game name
@@ -33,6 +35,16 @@ def ensure_indexes():
             unique=True,
             name="uq_xp_user_unique_key",
         )
+        events.create_index(
+            [("type", ASCENDING), ("uid", ASCENDING), ("chat_id", ASCENDING), ("message_id", ASCENDING)],
+            unique=True,
+            name="uq_events_type_uid_chat_message",
+        )
+        members.create_index(
+            [("uid", ASCENDING)],
+            unique=True,
+            name="uq_members_uid",
+        )     
     except DuplicateKeyError:
         pass
 
@@ -149,6 +161,25 @@ async def filter_mywin_media(update: Update, context: ContextTypes.DEFAULT_TYPE)
                 "ts": now,
             })
 
+            member_result = members.update_one(
+                {"uid": message.from_user.id},
+                {
+                    "$setOnInsert": {
+                        "uid": message.from_user.id,
+                        "level": 1,
+                        "role": "member",
+                        "affiliate_status": "none",
+                        "kpi": {
+                            "mywin": 0,
+                            "cbir": 0,
+                        },
+                    }
+                },
+                upsert=True,
+            )
+            if member_result.upserted_id is not None:
+                logging.info("member_upsert=1 uid=%s", message.from_user.id)
+         
             reason = "mywin_submission" if tag == "mywin" else "comeback_submission"
             xp_event = {
                 "user_id": message.from_user.id,
@@ -167,6 +198,37 @@ async def filter_mywin_media(update: Update, context: ContextTypes.DEFAULT_TYPE)
                 xp_events.insert_one(xp_event)
             except DuplicateKeyError:
                 pass
+
+
+            event_doc = {
+                "type": "MYWIN_VALID",
+                "uid": message.from_user.id,
+                "chat_id": message.chat_id,
+                "message_id": message.message_id,
+                "ts": now,
+                "tags": ["mywin"] if tag == "mywin" else ["cbir"],
+                "meta": {
+                    "tag": tag,
+                    "game_name": game_name,
+                },
+            }
+            try:
+                events.insert_one(event_doc)
+                logging.info(
+                    "event_written=1 type=%s uid=%s chat_id=%s message_id=%s",
+                    event_doc["type"],
+                    event_doc["uid"],
+                    event_doc["chat_id"],
+                    event_doc["message_id"],
+                )
+            except DuplicateKeyError:
+                logging.info(
+                    "event_dedup=1 type=%s uid=%s chat_id=%s message_id=%s",
+                    event_doc["type"],
+                    event_doc["uid"],
+                    event_doc["chat_id"],
+                    event_doc["message_id"],
+                )         
             return
 
     # delete anything else
