@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from pymongo import MongoClient, ASCENDING
 from pymongo.errors import DuplicateKeyError
 from telegram import Update
-from telegram.ext import ApplicationBuilder, MessageHandler, ContextTypes, filters
+from telegram.ext import ApplicationBuilder, MessageHandler, ContextTypes, filters 
 
 from mywin_quality import (
     analyze_mywin_image,
