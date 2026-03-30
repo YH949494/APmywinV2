@@ -2,9 +2,24 @@ import io
 import logging
 import os
 from dataclasses import dataclass
+from io import BytesIO
 from datetime import datetime, timedelta, timezone
 
-from PIL import Image, ImageFilter, ImageStat
+from PIL import Image, ImageFilter, ImageStat, UnidentifiedImageError
+
+try:
+    import numpy as np  # type: ignore
+    NUMPY_AVAILABLE = True
+except Exception:
+    np = None
+    NUMPY_AVAILABLE = False
+
+try:
+    import cv2  # type: ignore
+    CV2_AVAILABLE = True
+except Exception:
+    cv2 = None
+    CV2_AVAILABLE = False
 
 
 @dataclass
@@ -39,6 +54,36 @@ class MyWinImageDecision:
     duplicate_match: bool
 
 
+@dataclass
+class QualityDecision:
+    passed: bool
+    reason: str
+    width: int = 0
+    height: int = 0
+    file_size_kb: int = 0
+    sharpness: float = 0.0
+    stddev_gray: float = 0.0
+    cv2_available: bool = True
+    cv2_unavailable: bool = False
+    sharpness_method: str = "cv2_laplacian"
+    error_type: str = ""
+
+    def as_meta(self) -> dict:
+        return {
+            "passed": self.passed,
+            "reason": self.reason,
+            "width": self.width,
+            "height": self.height,
+            "file_size_kb": self.file_size_kb,
+            "sharpness": round(self.sharpness, 2),
+            "stddev_gray": round(self.stddev_gray, 2),
+            "cv2_available": self.cv2_available,
+            "cv2_unavailable": self.cv2_unavailable,
+            "sharpness_method": self.sharpness_method,
+            "error_type": self.error_type,
+        }
+
+
 def load_mywin_quality_config() -> MyWinImageQualityConfig:
     return MyWinImageQualityConfig(
         enabled=_parse_bool(os.getenv("MYWIN_IMG_FILTER_ENABLED", "1")),
@@ -52,6 +97,60 @@ def load_mywin_quality_config() -> MyWinImageQualityConfig:
         duplicate_hamming_threshold=int(os.getenv("MYWIN_IMG_DUPLICATE_HAMMING_THRESHOLD", "5")),
         duplicate_lookback_days=int(os.getenv("MYWIN_IMG_DUPLICATE_LOOKBACK_DAYS", "30")),
     )
+
+
+def _env_int(name: str, default: int) -> int:
+    try:
+        return int(os.getenv(name, str(default)))
+    except Exception:
+        return default
+
+
+def _env_float(name: str, default: float) -> float:
+    try:
+        return float(os.getenv(name, str(default)))
+    except Exception:
+        return default
+
+
+def analyze_image_quality(file_bytes: bytes) -> QualityDecision:
+    min_width = _env_int("MYWIN_MIN_WIDTH", 720)
+    min_height = _env_int("MYWIN_MIN_HEIGHT", 720)
+    min_file_size_kb = _env_int("MYWIN_MIN_FILE_SIZE_KB", 80)
+    min_gray_stddev = _env_float("MYWIN_MIN_GRAY_STDDEV", 18.0)
+    min_sharpness = _env_float("MYWIN_MIN_SHARPNESS", 110.0)
+
+    try:
+        file_size_kb = int(round(len(file_bytes) / 1024.0))
+        pil_img = Image.open(BytesIO(file_bytes)).convert("RGB")
+        width, height = pil_img.size
+
+        gray_img = pil_img.convert("L")
+        gray = np.array(gray_img) if NUMPY_AVAILABLE and np is not None else None
+        if CV2_AVAILABLE and cv2 is not None and gray is not None:
+            sharpness = float(cv2.Laplacian(gray, cv2.CV_64F).var())
+            sharpness_method = "cv2_laplacian"
+        else:
+            sharpness = 0.0
+            sharpness_method = "skipped_cv2_unavailable"
+        stddev_gray = float(ImageStat.Stat(gray_img).stddev[0])
+        cv2_unavailable = not (CV2_AVAILABLE and cv2 is not None and gray is not None)
+
+        if width < min_width or height < min_height:
+            return QualityDecision(False, "low_resolution", width, height, file_size_kb, sharpness, stddev_gray, CV2_AVAILABLE, cv2_unavailable, sharpness_method)
+        if file_size_kb < min_file_size_kb:
+            return QualityDecision(False, "small_file_size", width, height, file_size_kb, sharpness, stddev_gray, CV2_AVAILABLE, cv2_unavailable, sharpness_method)
+        if stddev_gray < min_gray_stddev:
+            return QualityDecision(False, "low_detail_or_near_blank", width, height, file_size_kb, sharpness, stddev_gray, CV2_AVAILABLE, cv2_unavailable, sharpness_method)
+        if not cv2_unavailable and sharpness < min_sharpness:
+            return QualityDecision(False, "blurry_or_compressed", width, height, file_size_kb, sharpness, stddev_gray, CV2_AVAILABLE, cv2_unavailable, sharpness_method)
+
+        return QualityDecision(True, "pass", width, height, file_size_kb, sharpness, stddev_gray, CV2_AVAILABLE, cv2_unavailable, sharpness_method)
+    except (UnidentifiedImageError, OSError, ValueError):
+        return QualityDecision(False, "invalid_image", cv2_available=CV2_AVAILABLE, cv2_unavailable=not CV2_AVAILABLE, sharpness_method="none", error_type="decode_failure")
+    except Exception as exc:
+        logging.exception("[MYWIN_QUALITY] analysis failed err=%s", exc)
+        return QualityDecision(False, "analysis_failed", cv2_available=CV2_AVAILABLE, cv2_unavailable=not CV2_AVAILABLE, sharpness_method="none", error_type="analysis_failure")
 
 
 def analyze_mywin_image(image_bytes: bytes) -> MyWinImageMetrics:
