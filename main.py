@@ -101,21 +101,23 @@ async def _restrict_user_24h(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
 
 def _get_member_set_on_insert(uid: int) -> dict:
+    # Mongo update documents cannot mix parent and child paths (e.g. "moderation"
+    # with "moderation.last_*") in the same operation, so keep defaults as dotted
+    # nested-field paths to avoid parent/child write conflicts on upsert.
     return {
         "uid": uid,
         "level": 1,
         "role": "member",
         "affiliate_status": "none",
-        "kpi": {"mywin": 0, "cbir": 0},
-        "moderation": {
-            "mywin_low_quality_count": 0,
-            "last_low_quality_reason": None,
-            "last_low_quality_at": None,
-            "mywin_reject_count": 0,
-            "mywin_duplicate_count": 0,
-            "mywin_invalid_caption_count": 0,
-            "mywin_rate_limited_count": 0,
-        },
+        "kpi.mywin": 0,
+        "kpi.cbir": 0,
+        "moderation.mywin_low_quality_count": 0,
+        "moderation.last_low_quality_reason": None,
+        "moderation.last_low_quality_at": None,
+        "moderation.mywin_reject_count": 0,
+        "moderation.mywin_duplicate_count": 0,
+        "moderation.mywin_invalid_caption_count": 0,
+        "moderation.mywin_rate_limited_count": 0,
     }
 
 
