@@ -7,7 +7,7 @@ from pymongo.errors import DuplicateKeyError
 from telegram import Update, ChatPermissions
 from telegram.ext import ApplicationBuilder, MessageHandler, ContextTypes, filters 
 
-from mywin_quality import analyze_image_quality
+from mywin_quality import analyze_image_quality, analyze_mywin_image, is_near_duplicate_hash
 # ----------------------------
 # Config
 # ----------------------------
@@ -28,6 +28,41 @@ moderation_events = db["moderation_events"]
 
 # Accept either hashtag (case-insensitive), require at least one space + game name
 TAG_PATTERN = re.compile(r'^\s*#(?P<tag>mywin|comebackisreal)\s+(?P<game>.+)$', re.IGNORECASE)
+
+MEANINGLESS_GAME_NAMES = {"win", "screenshot", "test", "game", "slot", "haha", "nice"}
+
+
+def _normalize_game_name(raw: str) -> str:
+    return re.sub(r"\s+", " ", (raw or "").strip())
+
+
+def _is_meaningful_game_name(game_name: str) -> bool:
+    normalized = _normalize_game_name(game_name)
+    if not normalized:
+        return False
+    token = normalized.lower()
+    if token in MEANINGLESS_GAME_NAMES:
+        return False
+    if len(token) < 3:
+        return False
+    alnum_count = sum(1 for c in token if c.isalnum())
+    if alnum_count < 3:
+        return False
+    return True
+
+
+async def _reject_and_delete(update: Update, context: ContextTypes.DEFAULT_TYPE, reason: str, quality_meta: dict, count_as_low_quality: bool = True):
+    await _handle_low_quality_reject(
+        update,
+        context,
+        reason=reason,
+        quality_meta=quality_meta,
+        count_as_low_quality=count_as_low_quality,
+    )
+    try:
+        await update.message.delete()
+    except Exception:
+        pass
 
 def ensure_indexes():
     try:
@@ -53,6 +88,7 @@ def ensure_indexes():
         )
         moderation_events.create_index([("ts", ASCENDING)], name="ix_moderation_ts")
         mywin_posts.create_index([("file_id", ASCENDING)], unique=True, name="uq_mywin_file_id")
+        mywin_posts.create_index([("hash", ASCENDING), ("created_at", ASCENDING)], name="ix_mywin_hash_created_at")
     except DuplicateKeyError:
         pass
 
@@ -280,11 +316,11 @@ async def filter_mywin_media(update: Update, context: ContextTypes.DEFAULT_TYPE)
     m = TAG_PATTERN.match(caption_raw)
     if has_image and file_id and m:
         tag = m.group("tag").lower()         # "mywin" or "comebackisreal"
-        game_name = m.group("game").strip()  # preserve user’s casing
+        game_name = _normalize_game_name(m.group("game"))  # preserve user’s casing
 
-        if game_name:
+        if _is_meaningful_game_name(game_name):
             if _is_shadow_banned(message.from_user.id):
-                await _handle_low_quality_reject(
+                await _reject_and_delete(
                     update,
                     context,
                     reason="shadow_banned",
@@ -295,14 +331,13 @@ async def filter_mywin_media(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
             rate_limited, delta_seconds = _is_rate_limited(message.from_user.id, now)
             if rate_limited:
-                await _handle_low_quality_reject(
+                await _reject_and_delete(
                     update,
                     context,
                     reason="rate_limited",
                     quality_meta={"seconds_since_last_submit": round(delta_seconds, 3)},
                     count_as_low_quality=False,
                 )
-                await message.delete()
                 return
 
             min_width = _parse_int_env("MYWIN_MIN_WIDTH", 720)
@@ -313,7 +348,7 @@ async def filter_mywin_media(update: Update, context: ContextTypes.DEFAULT_TYPE)
                 and isinstance(meta_height, int)
                 and (meta_width < min_width or meta_height < min_height)
             ):
-                await _handle_low_quality_reject(
+                await _reject_and_delete(
                     update,
                     context,
                     reason="low_resolution",
@@ -323,7 +358,6 @@ async def filter_mywin_media(update: Update, context: ContextTypes.DEFAULT_TYPE)
                         "height": meta_height,
                     },
                 )
-                await message.delete()
                 return
 
             tg_file = None
@@ -343,50 +377,85 @@ async def filter_mywin_media(update: Update, context: ContextTypes.DEFAULT_TYPE)
                     message.message_id,
                     exc,
                 )
-                await _handle_low_quality_reject(
+                await _reject_and_delete(
                     update,
                     context,
                     reason="download_failed",
                     quality_meta={"error_type": "download_failure"},
                 )
-                await message.delete()
                 return
 
             file_size_kb = int(round(len(bytes(file_bytes or b"")) / 1024.0))
             min_file_size_kb = _parse_int_env("MYWIN_MIN_FILE_SIZE_KB", 80)
             if file_size_kb < min_file_size_kb:
-                await _handle_low_quality_reject(
+                await _reject_and_delete(
                     update,
                     context,
                     reason="small_file_size",
                     quality_meta={"file_size_kb": file_size_kb},
                 )
-                await message.delete()
                 return
 
             quality = analyze_image_quality(bytes(file_bytes or b""))
             if not quality.passed:
-                await _handle_low_quality_reject(
+                await _reject_and_delete(
                     update,
                     context,
                     reason=quality.reason,
                     quality_meta=quality.as_meta(),
                 )
-                await message.delete()
                 return
 
-            # check duplicate by file_id
+            try:
+                visual_metrics = analyze_mywin_image(bytes(file_bytes or b""))
+                visual_hash = visual_metrics.image_hash
+            except Exception as exc:
+                logging.exception("[MYWIN_QUALITY] image_hash_failed uid=%s chat_id=%s message_id=%s err=%s",
+                                  message.from_user.id, message.chat_id, message.message_id, exc)
+                await _reject_and_delete(
+                    update,
+                    context,
+                    reason="metadata_failure",
+                    quality_meta={"error_type": "image_hash_failure"},
+                )
+                return
+
+            # file_unique_id protects same Telegram file identity
             if mywin_posts.find_one({"file_id": file_id}):
-                await message.delete()
+                await _reject_and_delete(
+                    update,
+                    context,
+                    reason="duplicate_file_id",
+                    quality_meta={"file_id": file_id},
+                    count_as_low_quality=False,
+                )
+                return
+
+            # perceptual hash protects same/similar visual content
+            if is_near_duplicate_hash(
+                mywin_posts,
+                visual_hash,
+                _parse_int_env("MYWIN_IMG_DUPLICATE_HAMMING_THRESHOLD", 5),
+                _parse_int_env("MYWIN_IMG_DUPLICATE_LOOKBACK_DAYS", 30),
+            ):
+                await _reject_and_delete(
+                    update,
+                    context,
+                    reason="duplicate_image",
+                    quality_meta={"hash": visual_hash},
+                    count_as_low_quality=False,
+                )
                 return
 
             # insert record
             mywin_posts.insert_one({
                 "file_id": file_id,
+                "hash": visual_hash,
                 "user_id": message.from_user.id,
                 "tag": tag,
                 "game_name": game_name,
                 "ts": now,
+                "created_at": now,
             })
 
             member_result = members.update_one(
@@ -462,7 +531,13 @@ async def filter_mywin_media(update: Update, context: ContextTypes.DEFAULT_TYPE)
             },
             upsert=True,
         )
-    await message.delete()
+    await _reject_and_delete(
+        update,
+        context,
+        reason="invalid_caption",
+        quality_meta={"caption_present": bool(caption_raw)},
+        count_as_low_quality=False,
+    )
 
 # ----------------------------
 # Run Bot
