@@ -26,27 +26,45 @@ members = db["members"]
 admin_cache = db["admin_cache"]
 moderation_events = db["moderation_events"]
 
-# Accept either hashtag (case-insensitive), require at least one space + game name
-TAG_PATTERN = re.compile(r'^\s*#(?P<tag>mywin|comebackisreal)\s+(?P<game>.+)$', re.IGNORECASE)
+STRICT_TAG_PATTERN = re.compile(
+    r"^#(?P<tag>mywin|comebackisreal) (?P<game>[A-Za-z0-9][A-Za-z0-9 &'\-:()]{1,39})$",
+    re.IGNORECASE,
+)
 
-MEANINGLESS_GAME_NAMES = {"win", "screenshot", "test", "game", "slot", "haha", "nice"}
+BLOCKED_GAME_NAMES = {
+    "test",
+    "testing",
+    "ok",
+    "nice",
+    "hi",
+    "hello",
+    "mywin",
+    "comebackisreal",
+    "game",
+    "slot",
+}
 
 
-def _normalize_game_name(raw: str) -> str:
-    return re.sub(r"\s+", " ", (raw or "").strip())
+def normalize_caption(text: str) -> str:
+    # Normalize user input so random spacing/newlines/tabs cannot bypass strict format checks.
+    return re.sub(r"\s+", " ", (text or "").strip())
 
 
-def _is_meaningful_game_name(game_name: str) -> bool:
-    normalized = _normalize_game_name(game_name)
-    if not normalized:
+def is_valid_game_name(name: str) -> bool:
+    game = normalize_caption(name)
+    if not game:
         return False
-    token = normalized.lower()
-    if token in MEANINGLESS_GAME_NAMES:
+    if len(game) < 2 or len(game) > 40:
         return False
-    if len(token) < 3:
+    # Reject hashtag reuse and links so caption is only hashtag + real game name text.
+    if "#" in game or re.search(r"(https?://|www\.|t\.me/|\.com\b|\.net\b|\.org\b)", game, re.IGNORECASE):
         return False
-    alnum_count = sum(1 for c in token if c.isalnum())
-    if alnum_count < 3:
+    if not re.fullmatch(r"[A-Za-z0-9 &'\-:()]+", game):
+        return False
+    if game.lower() in BLOCKED_GAME_NAMES:
+        # Reject obvious placeholders/random junk captions that are not actual game names.
+        return False
+    if sum(1 for c in game if c.isalnum()) < 2:
         return False
     return True
 
@@ -297,7 +315,8 @@ async def filter_mywin_media(update: Update, context: ContextTypes.DEFAULT_TYPE)
         return
 
     now = datetime.now(timezone.utc)
-    caption_raw = (message.caption or "").strip()  # keep original case for game name
+    caption_raw = (message.caption or "")
+    caption_normalized = normalize_caption(caption_raw)
 
     # detect if it has image
     has_image = bool(
@@ -313,12 +332,12 @@ async def filter_mywin_media(update: Update, context: ContextTypes.DEFAULT_TYPE)
         file_id = message.document.file_unique_id
 
     # validate caption against accepted tags
-    m = TAG_PATTERN.match(caption_raw)
+    m = STRICT_TAG_PATTERN.match(caption_normalized)
     if has_image and file_id and m:
         tag = m.group("tag").lower()         # "mywin" or "comebackisreal"
-        game_name = _normalize_game_name(m.group("game"))  # preserve user’s casing
+        game_name = normalize_caption(m.group("game"))  # preserve user’s casing
 
-        if _is_meaningful_game_name(game_name):
+        if is_valid_game_name(game_name):
             if _is_shadow_banned(message.from_user.id):
                 await _reject_and_delete(
                     update,
@@ -535,7 +554,7 @@ async def filter_mywin_media(update: Update, context: ContextTypes.DEFAULT_TYPE)
         update,
         context,
         reason="invalid_caption",
-        quality_meta={"caption_present": bool(caption_raw)},
+        quality_meta={"caption_present": bool(caption_normalized)},
         count_as_low_quality=False,
     )
 
