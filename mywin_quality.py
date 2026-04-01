@@ -209,7 +209,7 @@ def is_near_duplicate_hash(
     now = datetime.now(timezone.utc)
     lookback_start = now - timedelta(days=lookback_days)
     cursor = collection.find(
-        {"created_at": {"$gte": lookback_start}, "hash": {"$exists": True}},
+        {"$or": [{"created_at": {"$gte": lookback_start}}, {"ts": {"$gte": lookback_start}}], "hash": {"$exists": True}},
         {"hash": 1},
     )
     for doc in cursor:
