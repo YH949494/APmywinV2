@@ -129,6 +129,14 @@ def _parse_float_env(name: str, default: float) -> float:
         return default
 
 
+def _normalize_utc_datetime(value):
+    if not isinstance(value, datetime):
+        return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
 async def _restrict_user_24h(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
     message = update.message
     if not message or not message.from_user:
@@ -209,8 +217,10 @@ def _is_rate_limited(uid: int, now: datetime):
     min_gap_seconds = _parse_float_env("MYWIN_RATE_LIMIT_SECONDS", 10.0)
     doc = members.find_one({"uid": uid}, {"moderation.last_submission_at": 1})
     last_submission = (((doc or {}).get("moderation") or {}).get("last_submission_at"))
-    if min_gap_seconds > 0 and isinstance(last_submission, datetime):
-        delta = (now - last_submission).total_seconds()
+    now_utc = _normalize_utc_datetime(now) or now
+    last_submission_utc = _normalize_utc_datetime(last_submission)
+    if min_gap_seconds > 0 and last_submission_utc is not None:
+        delta = (now_utc - last_submission_utc).total_seconds()
         if delta < min_gap_seconds:
             return True, delta
 
@@ -232,15 +242,17 @@ def _is_rate_limited(uid: int, now: datetime):
     except DuplicateKeyError:
         latest = members.find_one({"uid": uid}, {"moderation.last_submission_at": 1})
         latest_submission = (((latest or {}).get("moderation") or {}).get("last_submission_at"))
-        if isinstance(latest_submission, datetime):
-            delta = (now - latest_submission).total_seconds()
+        latest_submission_utc = _normalize_utc_datetime(latest_submission)
+        if latest_submission_utc is not None:
+            delta = (now_utc - latest_submission_utc).total_seconds()
             return (delta < min_gap_seconds) if min_gap_seconds > 0 else False, delta
         return False, 0.0
     if update_result.matched_count == 0 and update_result.upserted_id is None:
         latest = members.find_one({"uid": uid}, {"moderation.last_submission_at": 1})
         latest_submission = (((latest or {}).get("moderation") or {}).get("last_submission_at"))
-        if isinstance(latest_submission, datetime):
-            delta = (now - latest_submission).total_seconds()
+        latest_submission_utc = _normalize_utc_datetime(latest_submission)
+        if latest_submission_utc is not None:
+            delta = (now_utc - latest_submission_utc).total_seconds()
             return (delta < min_gap_seconds) if min_gap_seconds > 0 else False, delta
     return False, 0.0
 
@@ -550,12 +562,17 @@ async def filter_mywin_media(update: Update, context: ContextTypes.DEFAULT_TYPE)
         count_as_low_quality=False,
     )
 
+
+async def _telegram_error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+    logging.exception("[TELEGRAM_ERROR] update=%s err=%s", update, context.error)
+
 # ----------------------------
 # Run Bot
 # ----------------------------
 def main():
     ensure_indexes()
     app_bot = ApplicationBuilder().token(BOT_TOKEN).build()
+    app_bot.add_error_handler(_telegram_error_handler)
     # (Optional but recommended) only process photos or image documents to reduce noise:
     img_filter = (filters.PHOTO | filters.Document.IMAGE)
     app_bot.add_handler(MessageHandler(img_filter, filter_mywin_media))
