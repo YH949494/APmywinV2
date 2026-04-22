@@ -33,8 +33,8 @@ members = db["members"]
 admin_cache = db["admin_cache"]
 mywin_image_hashes = db["mywin_image_hashes"]
 
-# Accept either hashtag (case-insensitive), require at least one space + game name
-TAG_PATTERN = re.compile(r'^\s*#(?P<tag>mywin|comebackisreal)\s+(?P<game>.+)$', re.IGNORECASE)
+# Accept either hashtag (case-insensitive); optional "+" separator before game name
+TAG_PATTERN = re.compile(r'^\s*#(?P<tag>mywin|comebackisreal)\s+(?:\+\s+)?(?P<game>.+)$', re.IGNORECASE)
 
 def ensure_indexes():
     try:
