@@ -10,14 +10,14 @@ from PIL import Image, ImageFilter, ImageStat
 @dataclass
 class MyWinImageQualityConfig:
     enabled: bool = True
-    min_width: int = 300
-    min_height: int = 300
-    min_file_size_bytes: int = 30720
-    reject_blur_threshold: float = 50.0
-    ignore_blur_threshold: float = 120.0
-    reject_blur_max_file_size_bytes: int = 81920
+    min_width: int = 480
+    min_height: int = 480
+    min_file_size_bytes: int = 51200
+    reject_blur_threshold: float = 80.0
+    ignore_blur_threshold: float = 200.0
     blank_stddev_threshold: float = 8.0
-    duplicate_hamming_threshold: int = 5
+    max_saturation_mean: float = 0.82
+    duplicate_hamming_threshold: int = 10
     duplicate_lookback_days: int = 30
 
 
@@ -28,6 +28,7 @@ class MyWinImageMetrics:
     file_size: int
     blur_score: float
     blank_stddev: float
+    saturation_mean: float
     image_hash: str
 
 
@@ -42,29 +43,32 @@ class MyWinImageDecision:
 def load_mywin_quality_config() -> MyWinImageQualityConfig:
     return MyWinImageQualityConfig(
         enabled=_parse_bool(os.getenv("MYWIN_IMG_FILTER_ENABLED", "1")),
-        min_width=int(os.getenv("MYWIN_IMG_MIN_WIDTH", "300")),
-        min_height=int(os.getenv("MYWIN_IMG_MIN_HEIGHT", "300")),
-        min_file_size_bytes=int(os.getenv("MYWIN_IMG_MIN_FILE_SIZE_BYTES", "30720")),
-        reject_blur_threshold=float(os.getenv("MYWIN_IMG_REJECT_BLUR_THRESHOLD", "50")),
-        ignore_blur_threshold=float(os.getenv("MYWIN_IMG_IGNORE_BLUR_THRESHOLD", "120")),
-        reject_blur_max_file_size_bytes=int(os.getenv("MYWIN_IMG_REJECT_BLUR_MAX_FILE_SIZE_BYTES", "81920")),
+        min_width=int(os.getenv("MYWIN_IMG_MIN_WIDTH", "480")),
+        min_height=int(os.getenv("MYWIN_IMG_MIN_HEIGHT", "480")),
+        min_file_size_bytes=int(os.getenv("MYWIN_IMG_MIN_FILE_SIZE_BYTES", "51200")),
+        reject_blur_threshold=float(os.getenv("MYWIN_IMG_REJECT_BLUR_THRESHOLD", "80")),
+        ignore_blur_threshold=float(os.getenv("MYWIN_IMG_IGNORE_BLUR_THRESHOLD", "200")),
         blank_stddev_threshold=float(os.getenv("MYWIN_IMG_BLANK_STDDEV_THRESHOLD", "8")),
-        duplicate_hamming_threshold=int(os.getenv("MYWIN_IMG_DUPLICATE_HAMMING_THRESHOLD", "5")),
+        max_saturation_mean=float(os.getenv("MYWIN_IMG_MAX_SATURATION_MEAN", "0.82")),
+        duplicate_hamming_threshold=int(os.getenv("MYWIN_IMG_DUPLICATE_HAMMING_THRESHOLD", "10")),
         duplicate_lookback_days=int(os.getenv("MYWIN_IMG_DUPLICATE_LOOKBACK_DAYS", "30")),
     )
 
 
 def analyze_mywin_image(image_bytes: bytes) -> MyWinImageMetrics:
     file_size = len(image_bytes)
-    image = Image.open(io.BytesIO(image_bytes)).convert("L")
-    width, height = image.size
+    image_rgb = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+    width, height = image_rgb.size
 
+    saturation_mean = _compute_saturation_mean(image_rgb)
+
+    image_gray = image_rgb.convert("L")
     # edge-variance blur proxy (higher = sharper)
-    edges = image.filter(ImageFilter.FIND_EDGES)
+    edges = image_gray.filter(ImageFilter.FIND_EDGES)
     blur_score = ImageStat.Stat(edges).var[0]
 
-    blank_stddev = ImageStat.Stat(image).stddev[0]
-    image_hash = _dhash_hex(image)
+    blank_stddev = ImageStat.Stat(image_gray).stddev[0]
+    image_hash = _dhash_hex(image_gray)
 
     return MyWinImageMetrics(
         width=width,
@@ -72,6 +76,7 @@ def analyze_mywin_image(image_bytes: bytes) -> MyWinImageMetrics:
         file_size=file_size,
         blur_score=blur_score,
         blank_stddev=blank_stddev,
+        saturation_mean=saturation_mean,
         image_hash=image_hash,
     )
 
@@ -91,11 +96,10 @@ def decide_mywin_image_quality(
         return MyWinImageDecision("REJECT", "blank_image", metrics, duplicate_match)
     if duplicate_match:
         return MyWinImageDecision("REJECT", "duplicate_image", metrics, duplicate_match)
-    if (
-        metrics.blur_score < cfg.reject_blur_threshold
-        and metrics.file_size <= cfg.reject_blur_max_file_size_bytes
-    ):
-        return MyWinImageDecision("REJECT", "extreme_blur_small_file", metrics, duplicate_match)
+    if metrics.blur_score < cfg.reject_blur_threshold:
+        return MyWinImageDecision("REJECT", "blur", metrics, duplicate_match)
+    if metrics.saturation_mean > cfg.max_saturation_mean:
+        return MyWinImageDecision("REJECT", "over_saturated", metrics, duplicate_match)
     if metrics.blur_score < cfg.ignore_blur_threshold:
         return MyWinImageDecision("IGNORE", "blur", metrics, duplicate_match)
     return MyWinImageDecision("PASS", "clear", metrics, duplicate_match)
@@ -137,7 +141,7 @@ def store_hash_record(collection, user_id: int, message_id: int, image_hash: str
 def log_mywin_quality(user_id: int, decision: MyWinImageDecision) -> None:
     m = decision.metrics
     logging.info(
-        "[MYWIN][QUALITY] decision=%s reason=%s user_id=%s width=%s height=%s file_size=%s blur_score=%.2f blank_stddev=%.2f duplicate_match=%s",
+        "[MYWIN][QUALITY] decision=%s reason=%s user_id=%s width=%s height=%s file_size=%s blur_score=%.2f blank_stddev=%.2f saturation_mean=%.3f duplicate_match=%s",
         decision.decision,
         decision.reason,
         user_id,
@@ -146,12 +150,25 @@ def log_mywin_quality(user_id: int, decision: MyWinImageDecision) -> None:
         m.file_size,
         m.blur_score,
         m.blank_stddev,
+        m.saturation_mean,
         decision.duplicate_match,
     )
 
 
 def _parse_bool(value: str) -> bool:
     return (value or "").lower() in {"1", "true", "yes", "on"}
+
+
+def _compute_saturation_mean(image_rgb: Image.Image) -> float:
+    """Return mean HSV saturation in [0, 1] over a 150×150 downsample."""
+    small = image_rgb.resize((150, 150), Image.Resampling.LANCZOS)
+    pixels = list(small.getdata())
+    total = 0.0
+    for r, g, b in pixels:
+        max_c = max(r, g, b)
+        if max_c > 0:
+            total += (max_c - min(r, g, b)) / max_c
+    return total / len(pixels)
 
 
 def _dhash_hex(image: Image.Image, hash_size: int = 8) -> str:
