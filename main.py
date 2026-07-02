@@ -240,13 +240,72 @@ async def filter_mywin_media(update: Update, context: ContextTypes.DEFAULT_TYPE)
 # ----------------------------
 # Run Bot
 # ----------------------------
+async def _telegram_error_handler(update, context):
+    logging.exception(
+        "[TELEGRAM_ERROR] "
+        "update=%s "
+        "error_type=%s "
+        "error=%s",
+        update,
+        type(context.error).__name__,
+        context.error,
+    )
+
 def main():
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(message)s"
+    )
+
+    logging.info(
+        "[BOOT] MYWIN_VERSION=2026-07-02-network-debug-v1"
+    )
+
     ensure_indexes()
-    app_bot = ApplicationBuilder().token(BOT_TOKEN).build()
+
+    app_bot = (
+        ApplicationBuilder()
+        .token(BOT_TOKEN)
+        .build()
+    )
+
+    logging.info(
+        "[BOOT] BOT_TOKEN_PRESENT=%s",
+        bool(BOT_TOKEN),
+    )
+
+    logging.info(
+        "[BOOT] MONGO_PRESENT=%s",
+        bool(MONGO_URL),
+    )
+
     # (Optional but recommended) only process photos or image documents to reduce noise:
     img_filter = (filters.PHOTO | filters.Document.IMAGE)
     app_bot.add_handler(MessageHandler(img_filter, filter_mywin_media))
-    app_bot.run_polling(poll_interval=5)
+
+    logging.info(
+        "[BOOT] ERROR_HANDLER_REGISTERING"
+    )
+
+    app_bot.add_error_handler(_telegram_error_handler)
+
+    logging.info(
+        "[BOOT] ERROR_HANDLER_REGISTERED"
+    )
+
+    logging.info(
+        "[BOOT] STARTING_POLLING"
+    )
+
+    app_bot.run_polling(
+        poll_interval=5,
+        timeout=30,
+        read_timeout=30,
+        write_timeout=30,
+        connect_timeout=30,
+        pool_timeout=30,
+        drop_pending_updates=True,
+    )
 
 if __name__ == "__main__":
     main()
